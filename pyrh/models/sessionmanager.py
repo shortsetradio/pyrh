@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union, cast
 from urllib.request import getproxies
-
+import getpass
 import certifi
 import pytz
 import requests
@@ -102,7 +102,7 @@ class SessionManager(BaseModel):
     def __init__(
         self,
         username: str,
-        password: str,
+        password: None,
         challenge_type: Optional[str] = "email",
         headers: Optional[CaseInsensitiveDictType] = None,
         proxies: Optional[Proxies] = None,
@@ -143,7 +143,8 @@ class SessionManager(BaseModel):
         Returns:
             Whether or not username and password are set.
         """
-        return self.password is not None and self.username is not None
+        # return self.password is not None and self.username is not None
+        return self.username is not None
 
     @property
     def authenticated(self) -> bool:
@@ -154,7 +155,11 @@ class SessionManager(BaseModel):
         """
         return "Authorization" in self.session.headers and not self.token_expired
 
-    def login(self, force_refresh: bool = False) -> None:
+    def login(
+        self,
+        password: str = None,
+        force_refresh: bool = False,
+    ) -> None:
         """Login to the session.
 
         This method logs the user in if they are not already and otherwise refreshes
@@ -166,7 +171,7 @@ class SessionManager(BaseModel):
 
         """
         if "Authorization" not in self.session.headers:
-            self._login_oauth2()
+            self._login_oauth2(password)
         elif self.oauth.is_valid and (self.token_expired or force_refresh):
             self._refresh_oauth2()
 
@@ -294,7 +299,10 @@ class SessionManager(BaseModel):
         if raise_errors:
             res.raise_for_status()
 
-        data = res.json() if schema is None else schema.load(res.json(), many=many)
+        if not res.text:
+            data = {}
+        else:
+            data = res.json() if schema is None else schema.load(res.json(), many=many)
 
         return (data, res) if return_response else data
 
@@ -413,7 +421,10 @@ class SessionManager(BaseModel):
         else:
             raise AuthenticationError("Too many incorrect mfa attempts")
 
-    def _login_oauth2(self) -> None:
+    def _login_oauth2(
+        self,
+        password: str = None,
+    ) -> None:
         """Create a new oauth2 token.
 
         Raises:
@@ -422,9 +433,14 @@ class SessionManager(BaseModel):
 
         """
         self.session.headers.pop("Authorization", None)
+        if self.username is None:
+            self.username = input('Username: ')
+
+        if password is None:
+            password = getpass.getpass(f'{self.username} - Password:')
 
         oauth_payload = {
-            "password": self.password,
+            "password": password,
             "username": self.username,
             "grant_type": "password",
             "client_id": CLIENT_ID,
@@ -441,7 +457,7 @@ class SessionManager(BaseModel):
             auto_login=False,
             schema=OAuthSchema(),
         )
-
+        # raise RuntimeError('test')
         if oauth.is_challenge:
             oauth = self._challenge_oauth2(oauth, oauth_payload)
         elif oauth.is_mfa:
